@@ -1,0 +1,32 @@
+version: '3.7'
+
+   
+services:
+   saslquota:
+    build:
+      context: .  # Define o contexto de construção como o diretório atual
+      dockerfile: Dockerfile  # Especifica o nome do Dockerfile
+
+    environment:
+      _bind: 0.0.0.0
+      _bindport: 10008
+      _bindtimeout:  45
+      _redishost: redis 
+      _redisport: 6379
+      _redisdb: 0
+      _logfacility: mail
+      _loglevel: DEBUG
+      _loghandler: syslog
+      _logaddress: localhost
+      _logport: 514
+      _quotafile: quotarules.json     
+    #volumes:
+    #  - ./quotarules.json:/postfix_saslquota/quotarules.json
+    ports:
+      - 10008:10008  
+
+   redis:
+     image: redis
+
+
+       
