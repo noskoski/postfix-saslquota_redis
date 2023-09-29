@@ -1,4 +1,7 @@
-POSTFIX_SASLQUOTA
+POSTFIX_SASLQUOTA_REDIS
+
+
+!!!!!  Wrong   setting, don´t follow it !!!!!!!
 
 Objective:
 

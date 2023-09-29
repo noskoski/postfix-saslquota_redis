@@ -5,10 +5,10 @@
 
 __author__      = "Leandro Abelin Noskoski"
 __site__	    = "www.alternativalinux.net"
-__projectpage__ = "https://github.com/noskoski/postfix_saslauth"
+__projectpage__ = "https://github.com/noskoski/postfix_saslauth_redis"
 __copyright__   = "Copyright 2020, Alternativa Linux"
 __license__ 	= "GPL"
-__version__ 	= "1.9"
+__version__ 	= "2.0"
 __maintainer__ 	= "Leandro A. Noskoski"
 __email__ 	    = "leandro@alternativalinux.net"
 __status__ 	    = "Production"
@@ -25,7 +25,7 @@ except:
     sys.stderr.write("can't open saslquota.json\n")
     quit()
 
-##OVERWRITE with environment variables (Dockerfile)
+##OVERWRITE with environment variables (Docker)
 for k, v in os.environ.items():
     _conf[k] = v
 
@@ -109,14 +109,12 @@ class Job(threading.Thread):
         logging.debug('%s thread started' % self.name)
         self.recv_timeout()
         if self.__sasl_username :
-
             ## load quota rules
             try:
                 with open(_conf["_quotafile"]) as jsonfile:
                     _quota = json.load(jsonfile)
             except:
-                logging.warning(self.name + " no quota rule file (" + _conf["_quotafile"] + ")")
-
+                logging.warning(self.name + " no quota rule file or no permission (" + _conf["_quotafile"] + ")")
             ## quota rule selection
             try:
                 if _quota[self.__sasl_username]:   ##By email
@@ -154,19 +152,11 @@ class Job(threading.Thread):
                 scan = r.scan(cursor=0,match=(str(self.__sasl_username) + '-*'),count=99999999)[1]
                 logsize = len(scan)
                 logging.debug(self.name + " found:" + str(logsize))
-
-
-                #_con = mysql.connector.connect(host=_conf["_myhost"], user=_conf["_myuser"], passwd=_conf["_mypasswd"], db=_conf["_mydb"])
-                #_cursor = _con.cursor()
-                #_cursor.execute("select count(*) from log where sasl_username =%s  and `date` >= DATE_SUB(now(6), INTERVAL %s SECOND)",(self.__sasl_username,_period,))
-                #record = _cursor.fetchone()
-                #ool = redis.ConectionPool(host=)
                 _log = self.name + ' sasl_username=' + str(self.__sasl_username) + ", rcpt=" + str(self.__recipient) + ", rule=" + str(self.__rule) + ", quota="+ str(logsize) + "/" + str(self.__rule_quota)  + "(" +  "{0:.2f}".format( ( int(logsize) ) / self.__rule_quota * 100) + "%), period=" + str(self.__rule_period)
             except:
                 logging.warning(self.name + " error reading redis log ")
                 logsize = 0 
                 _log = " error reading redis log "
-
 
             ### decision REJECT/ACCEPT
             if logsize <  self.__rule_quota :
@@ -190,13 +180,6 @@ class Job(threading.Thread):
                     logging.info(_log + ', action=REJECT ' + self.__rule_msg)
                 except socket.error as e:
                     logging.warning(self.name + " socket error: %s " % str(e))
-
-
-
-
-            #except socket.error as e:
-            #    logging.error(self.name + " socket error: %s " % str(e) )
-
 
         else:
             logging.error(self.name + " no sasl_username in the stream")
@@ -222,21 +205,9 @@ def service_shutdown(signum, frame):
 
 def Main():
     #try to connect at the start
-
-    #_con = mysql.connector.connect(host=_conf["_myhost"], user=_conf["_myuser"], passwd=_conf["_mypasswd"], db=_conf["_mydb"])
-    #_con.close()
-
     pool=redis.ConnectionPool(host=_conf["_redishost"], port=_conf["_redisport"])
     r = redis.StrictRedis(connection_pool=pool)
     r.ping()
-    #for x in range(4):
-    
-    #    r.set('leandro@gmail.com-' + str(random.random()), '', ex=30)
-        #value = r.get('mykey')
-    #scan = r.scan(cursor=0,match="leandro@gmail.com-*")[1]    
-    #print(len(scan))
-        
-    #exit(0)
 
     socket.setdefaulttimeout(int(_conf["_bindtimeout"]))
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -247,13 +218,10 @@ def Main():
     i = 1
     aThreads = []
     sockok=0
-
     while (not sockok):
-
         try:
             s.bind( ( str(_conf["_bind"]) , int(_conf["_bindport"])) )
             logging.debug('socket binded address: ' + str(_conf["_bind"]) + ":" + str(_conf["_bindport"]))
-            # put the socket into listening mode
             s.listen(128)
             logging.debug('socket is listening')
             sockok=1
@@ -266,9 +234,6 @@ def Main():
             logging.warning("socket error in startup: %s " % str(e) )
             time.sleep(2)
             continue
-
-
-
     # a forever loop until client wants to exit
     while True:
         try:
@@ -298,21 +263,14 @@ def Main():
                 aThreads.remove(th)
 
         logging.debug("thread count: " + str(len(aThreads)) )
-
     logging.debug('close socket ')
-
-
     for process in aThreads:
         process.join()
-
     try:
         s.close()
     except:
         pass
-
-
     self.terminate = 1
-
 
 if __name__ == '__main__':
     Main()
