@@ -152,7 +152,7 @@ class Job(threading.Thread):
                 scan = r.scan(cursor=0,match=(str(self.__sasl_username) + '-*'),count=99999999)[1]
                 logsize = len(scan)
                 logging.debug(self.name + " found:" + str(logsize))
-                _log = self.name + ' sasl_username=' + str(self.__sasl_username) + ", rcpt=" + str(self.__recipient) + ", rule=" + str(self.__rule) + ", quota="+ str(logsize) + "/" + str(self.__rule_quota)  + "(" +  "{0:.2f}".format( ( int(logsize) ) / self.__rule_quota * 100) + "%), period=" + str(self.__rule_period)
+                _log = self.name + ' sasl_username=' + str(self.__sasl_username) + ", rcpt=" + str(self.__recipient) + ", rule=" + str(self.__rule) + ", quota="+ str(logsize+1) + "/" + str(self.__rule_quota)  + "(" +  "{0:.2f}".format( ( int(logsize+1) ) / self.__rule_quota * 100) + "%), period=" + str(self.__rule_period)
             except:
                 logging.warning(self.name + " error reading redis log ")
                 logsize = 0 
@@ -164,9 +164,6 @@ class Job(threading.Thread):
                     self.sock.sendall(b"action=OK\n\n")
                     logging.info(_log + ", action=ACCEPT ")
                     try:
-                        #_cursor = _con.cursor()
-                        #_cursor.execute("insert into log (sasl_username, date ) values (%s,now(6)) ", (self.__sasl_username,))
-                        #_con.commit()
                         r.set(self.__sasl_username + '-' + str(random.random()), '', ex=self.__rule_period)
 
                     except:
