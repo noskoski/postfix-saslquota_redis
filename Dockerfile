@@ -10,7 +10,6 @@ RUN     rm -f   /etc/localtime && \
         ln -fs /usr/share/zoneinfo/America/Sao_Paulo /etc/localtime 
 
 RUN 	chmod ugo+rx /etc/ssl/* -R
-#RUN make-ssl-cert generate-default-snakeoil --force-overwrite 
 
 COPY /src/ /postfix_saslquota/
 
@@ -43,7 +42,5 @@ RUN  pip3 install redis
 
 
 HEALTHCHECK CMD netstat -an | grep ${_bindport} > /dev/null; if [ 0 != $? ]; then exit 1; fi;
-
-#VOLUME ["/postfix_saslquota"]
 
 CMD [ "python", "/postfix_saslquota/saslquota.py" ]
