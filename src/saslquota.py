@@ -40,6 +40,23 @@ else:
 
 logger.setLevel(logging.getLevelName(_conf["_loglevel"]))
 
+def select_rule(rules, sasl_username):
+    """Select quota rule by user, domain, or default."""
+    if not rules or not sasl_username:
+        return None, None, None, None
+    if sasl_username in rules:
+        rule = rules[sasl_username]
+        return sasl_username, rule.get("period"), rule.get("msgquota"), rule.get("msg")
+    if "@" in sasl_username:
+        domain = sasl_username.split("@", 1)[1]
+        if domain in rules:
+            rule = rules[domain]
+            return domain, rule.get("period"), rule.get("msgquota"), rule.get("msg")
+    if "default" in rules:
+        rule = rules["default"]
+        return "default", rule.get("period"), rule.get("msgquota"), rule.get("msg")
+    return None, None, None, None
+
 
 
 class Job(threading.Thread):
@@ -59,9 +76,8 @@ class Job(threading.Thread):
         self.__end='\n\n'
         self.__total_data = ""
         self.terminate = 0
-        thread = threading.Thread(target=self.run, args=())
-        thread.daemon = True                            # Daemonize thread
-        thread.start()                                  # Start the execution
+        self.daemon = True
+        self.start()
 
 
     ## read the stream
@@ -116,41 +132,20 @@ class Job(threading.Thread):
             except:
                 logging.warning(self.name + " no quota rule file or no permission (" + _conf["_quotafile"] + ")")
             ## quota rule selection
-            try:
-                if _quota[self.__sasl_username]:   ##By email
-                    logging.debug(self.name + " quota rule selected: (" + str(self.__sasl_username) + ")")
-                    self.__rule  = self.__sasl_username
-                    self.__rule_period = _quota[self.__sasl_username]["period"]
-                    self.__rule_quota = _quota[self.__sasl_username]["msgquota"]
-                    self.__rule_msg = _quota[self.__sasl_username]["msg"]
-            except:
-                try:
-                    if _quota[self.__sasl_username.split("@")[1]]:  #By domain
-                        logging.debug(self.name + " quota rule selected: (" + str(self.__sasl_username.split("@")[1]) + ")")
-                        self.__rule = self.__sasl_username.split("@")[1]
-                        self.__rule_period = _quota[self.__sasl_username.split("@")[1]]["period"]
-                        self.__rule_quota = _quota[self.__sasl_username.split("@")[1]]["msgquota"]
-                        self.__rule_msg = _quota[self.__sasl_username.split("@")[1]]["msg"]
-                except:
-                    try:
-                        if _quota["default"]:                          #By default Rule
-                            logging.debug(self.name + " quota rule selected: (default)")
-                            self.__rule = "default"
-                            self.__rule_period = _quota["default"]["period"]
-                            self.__rule_quota = _quota["default"]["msgquota"]
-                            self.__rule_msg = _quota["default"]["msg"]
-                    except:
-                        logging.warning(self.name + " No default quota Rule \"default\", forging one, 500 per day per email")
-                        self.__rule_rule = "forged"
-                        self.__rule_period = 86400
-                        self.__rule_quota = 501
-                        self.__rule_msg = "Sorry you send too much e-mails, wait and send it later..."
+            self.__rule, self.__rule_period, self.__rule_quota, self.__rule_msg = select_rule(_quota, self.__sasl_username)
+            if self.__rule:
+                logging.debug(self.name + " quota rule selected: (" + str(self.__rule) + ")")
+            else:
+                logging.warning(self.name + " No default quota Rule \"default\", forging one, 500 per day per email")
+                self.__rule_rule = "forged"
+                self.__rule_period = 86400
+                self.__rule_quota = 501
+                self.__rule_msg = "Sorry you send too much e-mails, wait and send it later..."
 
             try:
                 pool=redis.ConnectionPool(host=_conf["_redishost"], port=_conf["_redisport"])
                 r = redis.StrictRedis(connection_pool=pool)
-                scan = r.scan(cursor=0,match=(str(self.__sasl_username) + '-*'),count=99999999)[1]
-                logsize = len(scan)
+                logsize = sum(1 for _ in r.scan_iter(match=(str(self.__sasl_username) + '-*'), count=1000))
                 logging.debug(self.name + " found:" + str(logsize))
                 _log = self.name + ' sasl_username=' + str(self.__sasl_username) + ", rcpt=" + str(self.__recipient) + ", rule=" + str(self.__rule) + ", quota="+ str(logsize) + "/" + str(self.__rule_quota)  + "(" +  "{0:.2f}".format( ( int(logsize) ) / self.__rule_quota * 100) + "%), period=" + str(self.__rule_period)
             except:
@@ -218,6 +213,7 @@ def Main():
     i = 1
     aThreads = []
     sockok=0
+    running = True
     while (not sockok):
         try:
             s.bind( ( str(_conf["_bind"]) , int(_conf["_bindport"])) )
@@ -235,7 +231,7 @@ def Main():
             time.sleep(2)
             continue
     # a forever loop until client wants to exit
-    while True:
+    while running:
         try:
             c, addr = s.accept()
         except socket.error as e:
@@ -247,6 +243,8 @@ def Main():
                 th.shutdown_flag.set()
                 th.sock.close()
                 th.join()
+            running = False
+            continue
         # lock acquired by client
         # Start a new thread and return its identifier
         if c:
@@ -258,7 +256,7 @@ def Main():
         if (i > 99999):
             i = 0
 
-        for th in aThreads:
+        for th in aThreads[:]:
             if th.terminate:
                 aThreads.remove(th)
 
@@ -270,7 +268,6 @@ def Main():
         s.close()
     except:
         pass
-    self.terminate = 1
 
 if __name__ == '__main__':
     Main()

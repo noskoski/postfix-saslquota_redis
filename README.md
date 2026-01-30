@@ -1,141 +1,100 @@
 POSTFIX_SASLQUOTA_REDIS
 
+Objective
 
-!!!!!  Wrong   setting, don´t follow it !!!!!!!
+Lightweight Postfix policy daemon to enforce per-sasl_username quotas using Redis.
 
-Objective:
+Requirements
 
-An simple alternative to Policyd ( only quota module for now ), lighter and easy to configure. 
+- Python 3
+- Redis
+- Postfix (policy service)
 
+Quick start (Docker Compose)
 
-Instalation:
+1) Build and start
 
-  1 - install needed packages 
-  ubuntu/debain:
-    apt install supervisor python3
-    pip install mysql-connector-python
-    
-  2 - copy and edit saslquota_supervisor.conf
-  
-       cp saslquota_supervisor.conf /etc/supervisor/conf.d/ 
-       
-       edit the content of saslquota_supervisor.conf
-  
+   docker-compose up --build
 
-  3 - edit configuration in saslquota.json  
+2) The service listens on _bind:_bindport (default 0.0.0.0:10008)
 
-	{
-   	"_bind" : "127.0.0.1",
-   	"_bindport" : 10008,
-   	"_bindtimeout" :  45,
-   	"_myhost" : "localhost",
-   	"_myuser" : "saslquota",
-   	"_mypasswd" : "*******",
-   	"_mydb": "saslquota",
-   	"_logfacility": "mail",
-   	"_loglevel": "DEBUG",
-   	"_quotafile": "quotarules.json"
-	}
+Configuration
 
-  3 - setup the quotas quotarules.json:
-  
-  	{
-   	"default" : {
-   	  "period": 120,
-   	  "msgquota": 500,
-   	  "msg": " Ops!!! Você já mandou o limite de 500 emails no intervalo de 120 segundos, tente novamente mais tarde "
-   	},
-   	"localhost" : {
-   	  "period": 1200,
-   	  "msgquota": 5000,
-   	  "msg": " Ops!!! você já mandou o limite de 5000 emails no intervalo de 1200 segundos, tente novamente mais tarde "
-   	},
-   	"root@localhost" : {
-   	  "period": 300,
-   	  "msgquota": 50,
-   	  "msg": " Ops!!! você já mandou o limite de 50 emails no intervalo de 300 segundos, tente novamente mais tarde  "
-   	}
-   	}
+The daemon reads saslquota.json and then overwrites values with environment
+variables (useful for Docker). Example (src/saslquota.json.orig):
 
+{
+  "_bind": "127.0.0.1",
+  "_bindport": 10008,
+  "_bindtimeout": 120,
+  "_redishost": "redis",
+  "_redisport": 6379,
+  "_redisdb": 0,
+  "_logaddress": "127.0.0.1",
+  "_logport": 514,
+  "_logfacility": "mail",
+  "_loglevel": "DEBUG",
+  "_quotafile": "quotarules.json",
+  "_loghandler": "syslog"
+}
 
+Quota rules
 
+Create quotarules.json with per-user, per-domain, or default rules:
 
+{
+  "default": {
+    "period": 120,
+    "msgquota": 500,
+    "msg": "Você já atingiu o limite, tente novamente mais tarde."
+  },
+  "example.com": {
+    "period": 1200,
+    "msgquota": 5000,
+    "msg": "Limite do domínio atingido."
+  },
+  "user@example.com": {
+    "period": 300,
+    "msgquota": 50,
+    "msg": "Limite do usuário atingido."
+  }
+}
 
-  4 - create mysql database and grant access
+Postfix integration
 
-        create database saslquota; 
-        grant all on saslquota.* to saslquota@localhost identified by '*******' ;
-        flush privileges;
-        
-  5 - import database structure
-					
-				root@:/# mysql -uroot -p  saslquota < mysql.sql
- 
-  5 - Restart supervisord an verify if is working
-		
-        - service supervisor restart
-        - supervisorctl
-          supervisor>  help      :) 
-   
-  6 - add line to /etc/postfix/main.cf
-  
-    saslquota = check_policy_service inet:127.0.0.1:10008 #change to the value of _bindport 
-  
-  7 - modify you /etc/postfix/master.cf ( smtps(465) or/and submission (587) entry, do not use this in smtp(25)  )
-	
-	submission inet n       -       y       -       -       smtpd 
-  	-o syslog_name=postfix/submission
-  	-o smtpd_tls_security_level=may
-  	-o smtpd_sasl_auth_enable=yes
-  	-o smtpd_tls_auth_only=no
-  	-o smtpd_reject_unlisted_recipient=no
-  	-o smtpd_client_restrictions=$saslquota    <<<<< here
-  
-  8 - service postfix reload   
+1) Add to /etc/postfix/main.cf
 
-  
+   saslquota = check_policy_service inet:127.0.0.1:10008
 
-Test:
- 
-  1 - verify if the daemon are listening:
-        
-        netstat -nl |grep 10008 ( use your _bindport value )
-        
-    
-  2 - The test
- 
-      cat Testfile | netcat 127.0.0.1 10008
-      
-      response:
-      action=OK 
-      
-      -----
-      see the mail/syslog log too:
-      
-   	Mar 13 10:53:00 mail postfix/saslquota[55354]:[1167] thread started
-   	Mar 13 10:53:00 mail postfix/saslquota[55354]:[1167] end of recv: (659)
-   	Mar 13 10:53:00 mail postfix/saslquota[55354]:[1167] quota rule selected: (default)
-   	Mar 13 10:53:00 mail postfix/saslquota[55354]:thread count: 2
-   	Mar 13 10:53:00 mail postfix/saslquota[55354]:[1167] sasl_username=contabilidade2@XXXXXXXX.br, rcpt=gabine@YYYYYYY.br, rule=default, quota 4/1500 (0.27%), period=86400, action=ACCEPT
-   	Mar 13 10:53:00 mail postfix/saslquota[55354]:[1167] thread stopped : (0.0784)
+2) Enable in master.cf for submission/smtps (not on port 25):
 
-  
-  3 - Try to send an email with an authenticated user and see the mail log
-      
-     
+   submission inet n       -       y       -       -       smtpd
+     -o syslog_name=postfix/submission
+     -o smtpd_tls_security_level=may
+     -o smtpd_sasl_auth_enable=yes
+     -o smtpd_tls_auth_only=no
+     -o smtpd_reject_unlisted_recipient=no
+     -o smtpd_client_restrictions=$saslquota
 
+3) Reload postfix
 
- 
- 
- 
- 
+   service postfix reload
 
+Testing
 
+1) Verify the daemon is listening
 
+   netstat -nl | grep 10008
 
+2) Send a policy request
 
+   cat src/Testfile | netcat 127.0.0.1 10008
 
+Response should be:
 
+   action=OK
 
+Logs
 
-
+- If _loghandler is syslog, check mail/syslog for policy logs.
+- If _loghandler is stdout, logs go to console (Docker logs).
